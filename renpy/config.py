@@ -1441,7 +1441,7 @@ at_transform_compare_full_context = False
 # A list of callbacks when the display starts.
 display_start_callbacks = []
 
-# If not None, the size of the sound buffer, in bytes.
+# If not None, the requested size of the audio device buffer, in sample frames.
 sound_buffer_size = None
 
 # If True, the default volumes are considered to be quadratic.
@@ -1686,6 +1686,12 @@ live2d_pose: bool = True
 """
 If True, Live2D displayables use the pose file of their model, unless the `pose` parameter says otherwise. If False,
 pose files are ignored by default.
+"""
+
+live2d_mask_clipping: bool = True
+"""
+If True, the textures Live2D uses for clipping masks are cropped to the bounds of the mask's geometry, which uses less
+memory. If False, each mask texture covers the model's whole canvas.
 """
 
 special_directory_map: dict[str, list[str]] = {"images": ["images"], "audio": ["audio"], "fonts": ["fonts"]}

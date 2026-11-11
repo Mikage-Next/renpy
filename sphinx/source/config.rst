@@ -789,7 +789,7 @@ Media (Music, Sound, and Video)
     and is expected to return a second audio filename, the latter of which
     will be played.
 
-    This is intended for use when an a games has audio file formats changed,
+    This is intended for use when a game has audio file formats changed,
     but it's not desired to update the game script.
 
     As video files are played using the audio subsystem, this is also called for video files.
@@ -1748,7 +1748,8 @@ Showing Images
     A function that's used in place of :func:`renpy.scene` by the :ref:`scene
     statement <scene-statement>`. Note that this is used to clear the screen,
     and :var:`config.show` is used to show a new image. This should have the same
-    signature as :func:`renpy.scene`.
+    signature as :func:`renpy.scene`. If the function does not accept a `tag`
+    parameter (or ``**kwargs``), it is called without it.
 
 .. var:: config.show = renpy.show
 

@@ -34,9 +34,19 @@ import renpy.versions
         ("master", True, False, True, "8.6.0.26110101+dirty"),
         ("master", False, False, False, "8.6.0.26110101+unofficial"),
         ("feature", False, False, True, "8.6.0.26110101+unofficial.dirty.feature"),
+        ("work/tom/test123", False, False, False, "8.6.0.26110101+unofficial.test123"),
+        ("work/tom/test123", False, False, True, "8.6.0.26110101+unofficial.dirty.test123"),
+        ("", False, False, False, "8.6.0.26110101+unofficial"),
+        ("", False, False, True, "8.6.0.26110101+unofficial.dirty"),
+        ("work/tom/test123", True, True, False, "8.6.0.26110101+nightly"),
     ],
 )
 def test_make_version_string(branch, official, nightly, dirty, expected):
+    """
+    Checks the version suffix. Only the part of the branch name after the last slash is used, and an empty
+    branch name (detached HEAD) must not leave a trailing dot. Official builds never include the branch.
+    """
+
     assert renpy.versions._make_version_string((8, 6, 0, 26110101), branch, official, nightly, dirty) == expected
 
 
@@ -50,6 +60,12 @@ def test_make_version_string(branch, official, nightly, dirty, expected):
     ],
 )
 def test_get_release_version(monkeypatch, version, branch, nightly, expected):
+    """
+    The release version is the last one that shipped. A nightly build of the fix branch reports the previous point
+    release, since the version it carries has not shipped yet, except for x.y.0, which has no previous point
+    release. Every other build reports its own version without the build date or suffix.
+    """
+
     monkeypatch.setattr(
         renpy.versions, "get_version", lambda: {"version": version, "branch": branch, "nightly": nightly}
     )
