@@ -1,6 +1,6 @@
 # Ren'Py in Mikage (iOS)
 
-This folder builds `RenPyRuntime.framework` for [Mikage](https://github.com/itsCheney/Mikage-Next).
+This folder builds `RenPyRuntime.framework` for [Mikage](https://github.com/Mikage-Next/Mikage-Next).
 Mikage's `scripts/build-renpy-ios.sh` drives it; it is not used by Ren'Py's
 own desktop, Android or renpy-build builds.
 
