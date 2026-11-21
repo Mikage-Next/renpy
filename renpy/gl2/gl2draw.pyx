@@ -82,6 +82,10 @@ IDENTITY = renpy.display.render.IDENTITY
 # Should we try to vsync?
 vsync = True
 
+# Oversamples that differ by less than this share a render's cached texture. At this size, the
+# textures differ by about a pixel in every thousand.
+cdef double OVERSAMPLE_TOLERANCE = 0.001
+
 cdef GLenum CONTEXT_PROFILE_MASK = 0x9126
 cdef GLint CONTEXT_CORE_PROFILE_BIT = 0x00000001
 
@@ -617,6 +621,11 @@ cdef class GL2Draw:
         if self.state_cache.core_profile:
             self.create_default_vao()
 
+        # The context may be reused from a renderer that existed before an utter restart,
+        # with its state (like the bound array buffer) left behind. Force the GL state to match
+        # the cache, as textures can be loaded before the first draw_render resets it.
+        self.state_cache.reset()
+
         # The shading language version the context actually provides, which
         # is what decides the dialect shaders are emitted in. This is read
         # directly from the context.
@@ -710,6 +719,9 @@ cdef class GL2Draw:
 
                 if self.state_cache.core_profile:
                     self.create_default_vao()
+
+                # Make the new context's GL state match the cache.
+                self.state_cache.reset()
 
             if recreated or renpy.emscripten:
                 renpy.display.interface.kill_textures()
@@ -892,10 +904,19 @@ cdef class GL2Draw:
 
         window_dpi_scale = window_display_scale / window_pixel_density
 
+        # SDL computes the pixel density from the integer window and drawable
+        # sizes, so with fractional scaling (e.g. Wayland at 175%) it can differ
+        # from the display scale by rounding error. Snap scales within that error
+        # of a multiple of 0.25, as acting on the error resizes the window, which
+        # changes the rounding error, which causes another resize, and so on forever.
+        nearest_dpi_scale = round(window_dpi_scale * 4.0) / 4.0
+        if nearest_dpi_scale > 0.0 and abs(window_dpi_scale - nearest_dpi_scale) < 0.01:
+            window_dpi_scale = nearest_dpi_scale
+
         if renpy.test.testexecution.get_test_window_size() is not None:
             window_dpi_scale = 1.0
 
-        dpi_changed = window_dpi_scale != self.dpi_scale
+        dpi_changed = abs(window_dpi_scale - self.dpi_scale) >= 0.01
 
         if dpi_changed:
             if not fullscreen and not maximized and self.physical_size is not None:
@@ -1284,8 +1305,9 @@ cdef class GL2Draw:
 
         `reverse`
              A MatrixStack that transforms from the model space to the drawable space. This is used to determine the
-             size of the textures to create when rendering to a texture, in some cases. This is only used to get the
-             size right, the position and rotation may or may not be correct.
+             size of the textures to create when rendering to a texture, in some cases. It includes the offsets
+             children are drawn at, so a perspective projection can find how far a mesh is from the camera, but
+             clipping and other effects of drawing are ignored.
 
         """
 
@@ -1303,11 +1325,16 @@ cdef class GL2Draw:
         cdef Render r = what
         cdef GL2Model model
         cdef int i
+        cdef MatrixStack outer
+        cdef MatrixStack child_reverse
 
         if r.loaded:
             return
 
         r.loaded = True
+
+        # The stack for the coordinates of r, and the stack for the coordinates of its children.
+        outer = reverse
 
         if r.reverse is not None:
             reverse = reverse.get_child().inplace_multiply(r.reverse)
@@ -1317,13 +1344,50 @@ cdef class GL2Draw:
         # even if uniforms isn't used.
 
         for c in r.children:
-            self.load_all_textures(c[0], reverse)
+            cx = c[1]
+            cy = c[2]
+
+            if cx or cy:
+                # Like draw_render, offset the child before applying r.reverse. Under a perspective camera,
+                # the offset can change how far the child is from the camera, and so how much it's scaled.
+                child_reverse = reverse.get_child()
+                child_reverse.ctake(outer)
+                child_reverse.inplace_offset(cx, cy)
+
+                if r.reverse is not None:
+                    child_reverse.inplace_multiply(r.reverse)
+
+                self.load_all_textures(c[0], child_reverse)
+
+            else:
+                self.load_all_textures(c[0], reverse)
 
         # If we have a mesh (or mesh=True), create the GL2Model.
         if r.mesh:
 
             if (r.mesh is True) and (not r.children):
                 return
+
+            oversample = self.estimate_mesh_scale(r, reverse)
+
+            if oversample is None:
+                # Part of the mesh is behind the camera, so it may be scaled up without limit.
+                oversample = renpy.config.mesh_oversample
+
+            elif r.properties is not None:
+                oversample *= r.properties.get("mesh_oversample_scale", 1.0)
+
+            oversample = max(1.0, min(oversample, renpy.config.mesh_oversample))
+
+            if (r.properties is not None) and not r.properties.get("mesh_oversample", True):
+                oversample = 1.0
+
+            # The children are rendered before the uniforms, so a render that is both a child
+            # and a uniform shares the child's oversampled texture.
+            textures = [
+                self.render_to_texture(c[0], properties=r.properties, oversample=oversample)
+                for c in r.children
+            ]
 
             if not r.uniforms:
                 uniforms = None
@@ -1335,7 +1399,7 @@ cdef class GL2Draw:
                 for k, v in r.uniforms.items():
                     if isinstance(v, Render):
                         self.load_all_textures(v, reverse)
-                        uniforms[k] = ctex = self.render_to_texture(v, properties=r.properties)
+                        uniforms[k] = ctex = self.render_to_texture(v, properties=r.properties, oversample=None)
                         uniforms.setdefault(k + "_res", (ctex.texture_width, ctex.texture_height))
                         uniforms.setdefault(k + "_OP_virtual_size", (v.width, v.height))
                     else:
@@ -1349,16 +1413,8 @@ cdef class GL2Draw:
                 r.shaders,
                 uniforms)
 
-            tx, ty = reverse.transform(1, 1)
-            oversample = math.hypot(tx, ty) / math.hypot(1, 1)
-
-            if r.properties is not None:
-                oversample *= r.properties.get("mesh_oversample_scale", 1.0)
-
-            oversample = max(1.0, min(oversample, renpy.config.mesh_oversample))
-
-            for i, c in enumerate(r.children):
-                model.set_texture(i, self.render_to_texture(c[0], properties=r.properties, oversample=oversample))
+            for i, texture in enumerate(textures):
+                model.set_texture(i, texture)
 
             if r.mesh is True:
                 tex = model.get_texture(0)
@@ -1378,12 +1434,148 @@ cdef class GL2Draw:
             for v in r.uniforms.values():
                 if isinstance(v, Render):
                     self.load_all_textures(v, reverse)
-                    self.render_to_texture(v, properties=r.properties)
+                    self.render_to_texture(v, properties=r.properties, oversample=None)
+
+    def estimate_mesh_scale(self, Render r, Matrix reverse):
+        """
+        Returns how much the mesh of `r` is scaled up when drawn, used to choose how much to oversample its texture.
+        `reverse` transforms the mesh's coordinates, which are the coordinates of the children of `r`, to the screen.
+
+        The scale is the derivative of the projected position along (1, 1), the largest at the four corners of `r`.
+        For an affine matrix it's the same everywhere: the scale and rotation of the matrix, without its offset. A
+        perspective projection also has to be divided by w, or the distance of the camera would count as scaling,
+        and a mesh tilted towards the camera is scaled more at one end than the other.
+
+        Returns None if a corner is behind the camera.
+        """
+
+        # When w doesn't depend on x and y, as for an affine matrix or a mesh facing a perspective camera, the
+        # scale is the same everywhere on the mesh.
+        if reverse.wdx == 0 and reverse.wdy == 0:
+            if reverse.wdw <= 0:
+                return None
+
+            dx, dy = reverse.transform(1, 1, 0, 0)
+            return math.hypot(dx, dy) / math.hypot(1, 1) / reverse.wdw
+
+        forward = None
+
+        if r.reverse is not None:
+            forward = r.forward if r.forward is not None else r.reverse.inverse()
+
+        dx, dy, _, dw = reverse.transform(1, 1, 0, 0, components=4)
+
+        rv = 0.0
+
+        for x, y in ((0, 0), (r.width, 0), (0, r.height), (r.width, r.height)):
+            mx, my, mz, mw = x, y, 0.0, 1.0
+
+            if forward is not None:
+                mx, my, mz, mw = forward.transform(x, y, 0.0, 1.0, components=4)
+
+                if mw <= 0:
+                    return None
+
+                mx /= mw
+                my /= mw
+                mz /= mw
+                mw = 1.0
+
+            px, py, _, pw = reverse.transform(mx, my, mz, mw, components=4)
+
+            if pw <= 0:
+                return None
+
+            tx = (dx * pw - px * dw) / (pw * pw)
+            ty = (dy * pw - py * dw) / (pw * pw)
+
+            rv = max(rv, math.hypot(tx, ty) / math.hypot(1, 1))
+
+        return rv
+
+    def create_cropped_texture(self, Render what, rect, properties, double oversample):
+        """
+        Renders the part of `what` inside `rect` to a texture, as requested by the crop_texture property of
+        `what`. `rect` is an (x, y, width, height) rectangle in the coordinates of `what`. `properties` and
+        `oversample` are as for render_to_texture.
+
+        The rectangle is grown outwards to whole texels of the texture, plus a texel of transparent padding, so the
+        texels are in the same place whatever the rectangle is, and a crop that changes from frame to frame doesn't
+        change how `what` is sampled. What `what` draws is still clipped to its own bounds.
+
+        The to_crop field of the texture is set to (x offset, y offset, x scale, y scale), so that a texture
+        coordinate uv for all of `what` becomes offset + uv * scale in the cropped texture.
+        """
+
+        x, y, w, h = rect
+
+        # The number of texels per unit of `what`, as render_to_texture will compute it.
+        sx = oversample
+        sy = oversample
+
+        if properties.get("drawable_resolution", True):
+            sx *= self.virt_to_draw.xdx
+            sy *= self.virt_to_draw.ydy
+
+        # A texture larger than the maximum size would be shrunk to fit, by an amount that depends on the
+        # rectangle. Instead, lower the oversample so that all of `what` fits, with texels to spare for
+        # growing the rectangle.
+        max_width = self.texture_loader.max_texture_width - 2
+        max_height = self.texture_loader.max_texture_height - 2
+
+        texture_oversample = oversample
+
+        if what.width * sx > max_width or what.height * sy > max_height:
+            factor = min(max_width / (what.width * sx), max_height / (what.height * sy))
+            texture_oversample *= factor
+            sx *= factor
+            sy *= factor
+
+        # Grow the rectangle by a texel, so the texels at its edge are transparent even when a texel is larger
+        # than any padding in the rectangle, as shaders may not sample past the edge.
+        left = max(0, math.floor(x * sx) - 1) / sx
+        top = max(0, math.floor(y * sy) - 1) / sy
+        right = (math.ceil((x + w) * sx) + 1) / sx
+        bottom = (math.ceil((y + h) * sy) + 1) / sy
+
+        cropped = Render(right - left, bottom - top)
+        cropped.xclipping = True
+        cropped.yclipping = True
+
+        # Growing the rectangle can take it past the edge of `what`, which must still clip what it draws.
+        if right > what.width or bottom > what.height:
+            clipped = Render(what.width - left, what.height - top)
+            clipped.xclipping = True
+            clipped.yclipping = True
+            clipped.subpixel_blit(what, (-left, -top))
+            cropped.blit(clipped, (0, 0))
+        else:
+            cropped.subpixel_blit(what, (-left, -top))
+
+        rv = self.texture_loader.render_to_texture(cropped, properties, texture_oversample)
+
+        # Cache the texture under the oversample that was requested, even if it was lowered to fit.
+        rv.render_oversample = oversample
+
+        cw = right - left
+        ch = bottom - top
+        rv.to_crop = (-left / cw, -top / ch, what.width / cw, what.height / ch)
+
+        return rv
 
     def render_to_texture(self, what, alpha=True, properties={}, oversample=1.0):
         """
         Renders `what` to a texture. The texture will have the drawable
-        size of `what`.
+        size of `what`, multiplied by `oversample`.
+
+        The texture is cached on `what`, and returned again when the same oversample,
+        within OVERSAMPLE_TOLERANCE, is requested. A request for a different oversample
+        renders `what` again, and the new texture replaces the cached one.
+
+        If `oversample` is None, a cached texture is returned whatever its oversample,
+        and `what` is rendered without oversampling if there isn't one. This is used for
+        renders passed as uniforms, so a render that is also the child of a mesh shares
+        the mesh's texture.
         """
 
         if properties is None:
@@ -1403,12 +1595,35 @@ cdef class GL2Draw:
                 what.add_mipmap()
             return what
 
-        if what.cached_texture is not None:
-            if need_mipmap:
-                what.cached_texture.add_mipmap()
-            return what.cached_texture
+        cached = what.cached_texture
 
-        rv = self.texture_loader.render_to_texture(what, properties, oversample)
+        if cached is not None:
+
+            # A texture that wasn't rendered from `what`, like a loaded image, has no oversample
+            # and is always used. (This may also be a Render, for an image loaded as tiles.)
+            cached_oversample = getattr(cached, "render_oversample", None)
+
+            # The oversample is computed from single-precision matrices, so it varies slightly
+            # between frames when the mesh rotates. Treat nearly equal values as the same.
+            if (
+                (oversample is None)
+                or (cached_oversample is None)
+                or (abs(cached_oversample - oversample) < OVERSAMPLE_TOLERANCE)
+            ):
+                if need_mipmap:
+                    cached.add_mipmap()
+                return cached
+
+        if oversample is None:
+            oversample = 1.0
+
+        crop = what.properties.get("crop_texture", None) if isinstance(what, Render) and what.properties else None
+
+        if crop is not None:
+            rv = self.create_cropped_texture(what, crop, properties, oversample)
+        else:
+            rv = self.texture_loader.render_to_texture(what, properties, oversample)
+
         what.cached_texture = rv
 
         return rv

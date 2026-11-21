@@ -298,6 +298,12 @@ cdef class GLTexture(GL2Model):
         # Used for loading surfaces.
         self.surface = None
 
+        # The oversample this was rendered at, when created by from_render.
+        self.render_oversample = None
+
+        # How to transform texture coordinates into this texture, if it was cropped.
+        self.to_crop = (0.0, 0.0, 1.0, 1.0)
+
         # Update the loader.
         self.loader = loader
 
@@ -428,6 +434,8 @@ cdef class GLTexture(GL2Model):
             "mipmap" : self.should_have_mipmaps(properties),
             "pixel_perfect" : properties.get("pixel_perfect", False),
             }
+
+        self.render_oversample = oversample
 
         cw, ch = size = what.get_size()
 

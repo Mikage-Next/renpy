@@ -6,6 +6,8 @@ import os
 import subprocess
 import sys
 
+import requests
+
 from renpy import version_tuple  # @UnresolvedImport
 
 branch = os.popen("git branch --show-current").read().strip()
@@ -13,8 +15,15 @@ branch = os.popen("git branch --show-current").read().strip()
 SOURCE = [
     "/home/tom/ab/renpy",
     "/home/tom/ab/renpy-build-" + branch,
-    "/home/tom/ab/pygame_sdl2",
 ]
+
+
+# Files in the dl directory that are not uploaded to the GitHub release.
+GITHUB_EXCLUDE = {
+    "android-native-symbols.zip",
+    "public_key.pem",
+    "updates.ecdsa",
+}
 
 
 from renpy.versions import generate_vc_version
@@ -22,12 +31,35 @@ from renpy.versions import generate_vc_version
 from distribute import read_release_version
 
 
+def get_release_notes(short_version):
+    """
+    Returns the notes for the GitHub release of `short_version` (a three-part version like 8.6.0).
+
+    This is the contents of the release announcement at https://www.renpy.org/release/<short_version>.md if it
+    exists, and otherwise a link to the release page. Errors other than a 404 are raised, so a network problem
+    doesn't silently replace the announcement with the link.
+    """
+
+    url = "https://www.renpy.org/release/" + short_version + ".md"
+
+    response = requests.get(url, timeout=30)
+
+    if response.status_code != 404:
+        response.raise_for_status()
+        return response.content.decode("utf-8")
+
+    print(f"{url} not found, using a link as the release notes.")
+    return "See https://www.renpy.org/release/" + short_version
+
+
 ap = argparse.ArgumentParser()
 
 ap.add_argument("--release", action="store_true")
 ap.add_argument("--prerelease", action="store_true")
 ap.add_argument("--experimental", action="store_true")
-ap.add_argument("--no-tag", "-n", action="store_true")
+ap.add_argument(
+    "--no-tag", "-n", action="store_true", help="Skip creating tags. The current commit must already be tagged."
+)
 ap.add_argument("--push-tags", action="store_true")
 ap.add_argument("--delete-tag")
 ap.add_argument("--github", action="store_true")
@@ -35,6 +67,9 @@ ap.add_argument("--real", action="store_true")
 ap.add_argument("--version")
 
 args = ap.parse_args()
+
+if args.no_tag and not subprocess.check_output(["git", "tag", "--points-at", "HEAD"]):
+    ap.error("--no-tag requires the current commit to have a tag.")
 
 if args.version:
     version = args.version
@@ -51,6 +86,8 @@ if not args.real:
     sys.exit(1)
 
 if args.github:
+    notes = get_release_notes(short_version)
+
     subprocess.check_call(["git", "push", "--tags"])
     subprocess.check_call([
         "gh",
@@ -58,7 +95,7 @@ if args.github:
         "create",
         version,
         "--notes",
-        "See https://www.renpy.org/release/" + short_version,
+        notes,
         "-t",
         "Ren'Py {}".format(short_version),
     ])
@@ -85,6 +122,9 @@ if args.github:
             continue
 
         if fn.endswith(".sums"):
+            continue
+
+        if fn in GITHUB_EXCLUDE:
             continue
 
         subprocess.check_call(["gh", "release", "upload", version, os.path.join(dn, fn)])
