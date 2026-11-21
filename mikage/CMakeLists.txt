@@ -19,7 +19,7 @@ get_filename_component(RENPY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 
 set(RENPY_PYTHON_PREFIX "" CACHE PATH "CPython 3.12 built for this SDK (include/python3.12, libpython3.12.a)")
 set(RENPY_DEPS_PREFIX "" CACHE PATH "vcpkg installed tree for this SDK's triplet")
-set(RENPY_FFMPEG_ROOT "" CACHE PATH "Prefix with FFmpeg's headers and static libraries for this SDK")
+set(RENPY_FFMPEG_FRAMEWORK "" CACHE PATH "The FFmpeg.framework Mikage embeds (for this SDK); its include trees are in Headers/")
 set(RENPY_SDL3_FRAMEWORK "" CACHE PATH "The SDL3.framework Mikage embeds (for this SDK)")
 set(RENPY_METALANGLE_FRAMEWORK "" CACHE PATH "MetalANGLE.framework (for this SDK)")
 set(RENPY_PYOBJUS_DIR "" CACHE PATH "Directory with the Cython output pyobjus.c and _runtime.h")
@@ -44,7 +44,7 @@ foreach(required
     "${RENPY_DEPS_PREFIX}/include/SDL3_image/SDL_image.h;sdl3-image"
     "${RENPY_DEPS_PREFIX}/include/assimp/cimport.h;assimp"
     "${RENPY_DEPS_PREFIX}/include/ffi.h;libffi"
-    "${RENPY_FFMPEG_ROOT}/include/libavformat/avformat.h;FFmpeg"
+    "${RENPY_FFMPEG_FRAMEWORK}/Headers/libavformat/avformat.h;FFmpeg.framework"
     "${RENPY_SDL3_FRAMEWORK}/Headers/SDL.h;SDL3.framework"
     "${RENPY_METALANGLE_FRAMEWORK}/Headers/GLES3/gl3.h;MetalANGLE.framework"
     "${RENPY_PYOBJUS_DIR}/pyobjus.c;pyobjus")
@@ -131,7 +131,7 @@ target_include_directories(RenPyRuntime PRIVATE
   "${RENPY_ROOT}/tmp/gen"
   "${RENPY_PYOBJUS_DIR}"
   "${RENPY_PYTHON_PREFIX}/include/python3.12"
-  "${RENPY_FFMPEG_ROOT}/include"
+  "${RENPY_FFMPEG_FRAMEWORK}/Headers"
   "${RENPY_DEPS_PREFIX}/include"
   "${RENPY_DEPS_PREFIX}/include/freetype2"
   "${RENPY_DEPS_PREFIX}/include/harfbuzz"
@@ -160,17 +160,10 @@ set_source_files_properties(MikageRenPyRuntime.mm MikageRenPyStubs.m PROPERTIES 
 # Every static library vcpkg installed for this SDK except its own SDL3.
 file(GLOB RENPY_DEPS_LIBRARIES "${RENPY_DEPS_PREFIX}/lib/*.a")
 list(FILTER RENPY_DEPS_LIBRARIES EXCLUDE REGEX "/libSDL3(_test)?\\.a$")
-set(RENPY_FFMPEG_LIBRARIES)
-foreach(name avformat avcodec swresample swscale avutil)
-  if(NOT EXISTS "${RENPY_FFMPEG_ROOT}/lib/lib${name}.a")
-    message(FATAL_ERROR "FFmpeg library missing: ${RENPY_FFMPEG_ROOT}/lib/lib${name}.a")
-  endif()
-  list(APPEND RENPY_FFMPEG_LIBRARIES "${RENPY_FFMPEG_ROOT}/lib/lib${name}.a")
-endforeach()
 
 target_link_libraries(RenPyRuntime PRIVATE
   "${RENPY_PYTHON_LIBRARY}"
-  ${RENPY_FFMPEG_LIBRARIES}
+  "${RENPY_FFMPEG_FRAMEWORK}"
   ${RENPY_DEPS_LIBRARIES}
   "${RENPY_SDL3_FRAMEWORK}"
   "-F${RENPY_METALANGLE_PARENT}"
