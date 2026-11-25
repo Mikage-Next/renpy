@@ -18,6 +18,18 @@ On Android 16 and later, the back button and back gesture once again roll back, 
 
 On macOS, colors are once again displayed as they were in Ren'Py 8.5, fixing a green tinge introduced in 8.6.0.
 
+On Android, HTTPS requests, including Ren'Py Sync, :func:`renpy.fetch`, and the updater, verify certificates against
+the device's certificate store. Since 8.6.0, every such request failed, which made Sync report that it could not
+connect to the Ren'Py Sync server.
+
+Ren'Py checks at startup that it can use the operating system's certificate store. If it can't, Ren'Py verifies HTTPS
+certificates against the certificate bundle shipped with certifi, and logs why to log.txt, rather than failing to
+start or failing every HTTPS request.
+
+When :var:`config.has_sync` is False, Ren'Py doesn't create a ``sync`` directory inside the save directory or write
+every save into it as well. If that directory already exists, it is still used, so saves downloaded while Sync was
+enabled can still be loaded.
+
 Scrying (which predicts things like extend and :var:`config.nvl_page_ctc`) now takes translations into account,
 rather than skipping over them.
 
@@ -29,6 +41,17 @@ In the :doc:`testing framework <testcases>`, a text selector matching dialogue n
 displayed, or with ``raw``, the dialogue as written in the original-language script. Previously, which of the two
 was matched depended on how the line was translated, and some translated lines caused an error.
 
+In the :doc:`testing framework <testcases>`, statements such as ``move`` and ``click`` run as soon as a layer
+transition finishes, and run after skipping a layer transition that outlasts the transition timeout. Previously, they
+waited for the transition timeout and then failed with a RecursionError.
+
+In the :doc:`testing framework <testcases>`, running tests filtered by testsuite or testcase name works when a
+testcase parameter is a tuple, or a string containing parentheses or dots, instead of failing with an "Invalid
+parameter filter" or "Unmatched parentheses" error.
+
+``renpy.pygame.Surface.blit`` returns the rectangle it drew, taking ``area`` and the clip rectangle into account, as
+pygame does.
+
 Live2D clipping mask textures that are being cropped to save space are now cropped in a way that aligns with
 texels, allowing these textures to be sampled consistently even when the crop changes as the model animates. This keeps
 the edges of the masked parts from flickering.
@@ -37,9 +60,30 @@ Meshes shown through a perspective camera, such as Live2D models and displayable
 to textures at the size they are drawn on screen. Previously, the camera's distance was counted as scaling, so these
 textures were rendered as large as :var:`config.mesh_oversample` allows, using more memory and GPU time.
 
+The :tpref:`blur` property blurs by the same number of pixels, measured on the screen in the game's coordinates,
+however much the displayable is zoomed and however large the window is. This fixes two issues:
+
+* Since Ren'Py 8.6.0, the blur was scaled along with the displayable, so a displayable drawn smaller than its own
+  size, such as with a zoom below 1, was blurred much less than in Ren'Py 8.5.
+* The blur was a fixed number of pixels on the display, so it was stronger in a window smaller than the game, and
+  weaker in a larger one, such as fullscreen on a high-resolution display. Games made for Ren'Py 8.5 and earlier keep
+  this behavior, which is controlled by the new :var:`config.blur_virtual_pixels` variable.
+
+:doc:`Creator-defined statements <cds>` can once again read text that isn't Python, such as with the lexer's ``rest``
+method, as in Ren'Py 8.5. Since Ren'Py 8.6.0, such text was reported as invalid syntax, stopping the game from
+starting. A statement registered with the new `strict_expression` argument to :func:`renpy.register_statement` has
+its Python expressions checked when the game loads, as Ren'Py's own statements do.
+
+Games that enable touch finger events through :var:`config.pygame_events` can once again receive FINGERDOWN, FINGERUP,
+and FINGERMOTION events, rather than getting an error when one occurs. FINGERCANCELED events include the touch and
+finger information as well.
+
 
 Other Changes
 -------------
+
+``renpy.pygame`` events are closer to pygame-ce's. Aliases and missing fields have been added. The new
+:doc:`pygame_events` page lists every event, its attributes, and how it differs from pygame-ce.
 
 Setting the new :envvar:`RENPY_SCREENSHOT_CLIPBOARD` environment variable to 0 stops the screenshot key from copying
 screenshots to the clipboard.
@@ -47,6 +91,20 @@ screenshots to the clipboard.
 Using :func:`Start` or :func:`renpy.jump_out_of_context` in the outermost context, such as during the splashscreen or
 in the game itself, reports an error explaining that there is no parent context to jump to, rather than quitting with
 an uncaught ``JumpOutException``.
+
+The new :ref:`u_pixels_per_unit <model-uniforms>` uniform gives shaders the number of pixels being drawn for each
+unit of the displayable.
+
+:func:`renpy.register_shader` takes keyword arguments beginning with ``default_``, which give default values for
+uniforms that aren't set. A default can be a callable, which is called each time the shader is applied. This lets a
+shader part gain a uniform without breaking code that uses the part directly.
+
+The new ``--list`` option to the ``test`` command lists the test suites and test cases that match the filters, by
+the names used to filter them, without running them. See the :doc:`testing framework <testcases>` documentation.
+
+The size and position of the game window are only saved once the window has stayed the same for two seconds, so the
+sizes a window passes through while it animates, such as when entering fullscreen, are ignored. Previously, a game that
+started in fullscreen could open a window as large as the screen when switched to windowed.
 
 .. _renpy-8.6.1:
 

@@ -56,6 +56,9 @@ cdef class GL2Draw:
     cdef public set gl_extensions
     cdef public bint ever_set_position
 
+    # Tracks the window size and position, so they're saved only once stable.
+    cdef public object window_geometry_debouncer
+
     cdef public tuple clip_rtt_box
 
     cdef public double draw_per_phys
@@ -159,6 +162,10 @@ cdef class GL2DrawingContext:
 
     # Has depth been enabled?
     cdef bint has_depth
+
+    # How many pixels of the framebuffer being drawn into there are per unit of the render being drawn, horizontally.
+    # This is the drawable pixels per virtual pixel for the screen, and texels per unit of the render for a texture.
+    cdef float pixels_per_unit
 
     # Enables or disables face culling. None if disabled. If enabled, "cw" or "ccw", giving the
     # winding order in the Ren'Py virtual coordinate system.

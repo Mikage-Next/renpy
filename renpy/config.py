@@ -1076,6 +1076,9 @@ context_copy_remove_screens = ["notify"]
 # An exception handling callback.
 exception_handler: Callable[[renpy.error.TracebackException], bool] | None = None
 
+# If True, the exception screen offers the Ignore button for exceptions that occur during the init phase.
+init_exception_ignore: bool = False
+
 # A label to jump to if return fails.
 return_not_found_label = None
 
@@ -1611,6 +1614,12 @@ If not None, the time in seconds before the music is unloaded when downloaded as
 mesh_pad_compat: bool = False
 """
 Should mesh pad work the way it did before 8.4? (That is, it shifts things to the right/down by pad_left/pad_top.)
+"""
+
+blur_virtual_pixels: bool = True
+"""
+If True, the blur transform property is measured in virtual pixels, so it keeps its strength relative to the game when
+the window is resized. If False, it's measured in drawable pixels, as it was in Ren'Py 8.5 and earlier.
 """
 
 mesh_oversample: float = 8.0

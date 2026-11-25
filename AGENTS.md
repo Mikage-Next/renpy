@@ -41,7 +41,7 @@ implementing local changes requested by the user in an interactive session).
 | Displayables, interaction loop | [renpy/display/](renpy/display/) (`displayable.py`, `core.py`, `layout.py`, `behavior.py`, `render.pyx`, `predict.py`) |
 | GPU renderer, text, audio | [renpy/gl2/](renpy/gl2/), [renpy/text/](renpy/text/), [renpy/audio/](renpy/audio/) |
 | Saves, persistent, rollback | [loadsave.py](renpy/loadsave.py), [persistent.py](renpy/persistent.py), [rollback.py](renpy/rollback.py), [revertable.py](renpy/revertable.py), [compat/pickle.py](renpy/compat/pickle.py) |
-| SDL3 bindings, C code | [renpy/pygame/](renpy/pygame/) (Cython, imported as `renpy.pygame`), [src/](src/) |
+| SDL3 bindings, C code | [renpy/pygame/](renpy/pygame/) (Cython, imported as `renpy.pygame`), [src/](src/); [pygame_events.rst](sphinx/source/pygame_events.rst) documents every event's names, default-enabled state, fields, and pygame-ce differences, and must be updated with any change to them |
 | Native build | [setup.py](setup.py), [scripts/setuplib.py](scripts/setuplib.py), [run.sh](run.sh) |
 | Launcher | [launcher/game/](launcher/game/) |
 | New-project template | [gui/](gui/) (copied into new games; edits do not reach existing games) |
@@ -374,6 +374,14 @@ test files, or the run will look like a hang after `Status: PASSED`:
 testsuite global:
     teardown:
         exit
+```
+
+To skip the main menu in a test game, define a `main_menu` label that returns, so the game goes straight to
+`label start`:
+
+```
+label main_menu:
+    return
 ```
 
 ### Which checks to run
