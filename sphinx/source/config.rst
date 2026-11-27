@@ -870,9 +870,10 @@ Media (Music, Sound, and Video)
 .. var:: config.fadeout_audio = 0.016
 
     The default audio fadeout time that's used to fade out audio, when
-    audio is stopped with the ``stop`` statement or :func:`renpy.music.stop`,
-    or when a new audio track is started with the ``play`` statement or
-    :func:`renpy.music.play`. This is not used when queued audio begins.
+    audio is stopped with the ``stop`` statement, :func:`renpy.music.stop`, or
+    ``renpy.sound.stop``, or when a new audio track is started with the
+    ``play`` statement, :func:`renpy.music.play`, or ``renpy.sound.play``.
+    This is not used when queued audio begins.
 
     A short fadeout is the default to prevent clicks and pops when
     audio is stopped or changed.
@@ -2540,6 +2541,13 @@ Debugging
     single parameter, the name of the missing label. It should return the
     name of a label to use as a replacement for the missing label, or None
     to cause Ren'Py to raise an exception.
+
+.. var:: config.persist_after_tests = False
+
+    If False, Ren'Py quits once the tests run by the ``test`` command finish. If True,
+    the game keeps running afterwards, and the player can continue it with the mouse and
+    keyboard. The :option:`--persist` and :option:`--nopersist` options of the ``test``
+    command override this. See :doc:`testcases`.
 
 .. var:: config.profile = False
 
